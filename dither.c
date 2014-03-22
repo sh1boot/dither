@@ -122,12 +122,13 @@ int main(int argc, char *argv[])
     char const *inname = NULL;
     char const *outname = "sine.wav";
     uint32_t rate = 44100;
-    uint32_t samples = rate * 15;
+    uint32_t duration = 15;
     double freq = 4000;
     double sin_amp = pow(10.0, -90.0 * 0.05);
     int lapbits = 0;
     int dtype = 2;
     int c = 0;
+    uint32_t samples;
     int fixbits;
     float in[4096];
     int16_t out[4096];
@@ -143,7 +144,7 @@ int main(int argc, char *argv[])
         case 'i': inname = optarg;                          break;
         case 'o': outname = optarg;                         break;
         case 'r': rate = atoi(optarg);                      break;
-        case 't': samples = atoi(optarg) * rate;            break;
+        case 't': duration = atoi(optarg);                  break;
         case 'f': freq = atoi(optarg);                      break;
         case 'a': sin_amp = pow(10.0, atof(optarg) * 0.05); break;
         case 'b': lapbits = atoi(optarg);                   break;
@@ -172,6 +173,7 @@ int main(int argc, char *argv[])
     }
     else
     {
+        samples = rate * duration;
         infile = NULL;
         sfinfo.samplerate = rate;
         sfinfo.frames = samples;
@@ -198,10 +200,11 @@ int main(int argc, char *argv[])
             i = samples;
             if (i > 4096) i = 4096;
             mksine(in, i, freq, rate, sin_amp);
-            samples -= i;
         }
         else
             i = sf_read_float(infile, in, 4096);
+
+        samples -= i;
 
         convert(out, in, i, fixbits, dtype, c);
 
