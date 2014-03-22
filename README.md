@@ -1,0 +1,4 @@
+dither
+======
+
+cheap audio dither
