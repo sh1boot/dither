@@ -5,13 +5,17 @@
 #include <limits.h>
 #include <math.h>
 #include <assert.h>
-#include <arm_neon.h>
 #include <sndfile.h>
+
+#if defined(__arm__)
+#include <arm_neon.h>
+#endif
 
 #if !defined(M_PI)
 #define M_PI 3.14159265358979323846264338
 #endif
 
+#if defined(__arm__)
 static inline
 void convert16d2(int16_t *out, float const *in, size_t count)
 {
@@ -54,6 +58,7 @@ void convert16d2(int16_t *out, float const *in, size_t count)
     vst1_u16(xstore, x);
     vst1_u16(cstore, c);
 }
+#endif
 
 #define RANDBITS() ((rand() ^ (rand() << 10) ^ (rand() >> 10)) & 0xffff)
 void convert_c(int16_t *out, float const *in, size_t count, int fixbits, int dtype)
@@ -99,22 +104,28 @@ void convert_c(int16_t *out, float const *in, size_t count, int fixbits, int dty
 
 void convert(int16_t *out, float const *in, size_t count, int fixbits, int dtype, int c)
 {
+#if defined(__arm__)
     if (c == 0 && dtype == 2 && fixbits == 16)
         convert16d2(out, in, count);
     else
+#endif
         convert_c(out, in, count, fixbits, dtype);
 }
 
-static void mksine(float *out, size_t count, int freq, int rate, float ampl)
+static void mksine(float *out, size_t count, double w0, double w1, double t_s, float ampl)
 {
-    static int off = 0;
-    int o = off;
+    static uint64_t off = 0;
+    double w1_0 = (w1 - w0) * 0.5;
+    uint64_t o = off;
     size_t i;
 
     for (i = 0; i < count; i++)
-        out[i] = ampl * sin(o++ * M_PI * 2.0 * freq / rate);
+    {
+        double t = o++ * t_s;
+        out[i] = ampl * sin(w0 * t + w1_0 * t * t);
+    }
 
-    off = o % freq;
+    off = o;
 }
 
 int main(int argc, char *argv[])
@@ -123,11 +134,15 @@ int main(int argc, char *argv[])
     char const *outname = "sine.wav";
     uint32_t rate = 44100;
     uint32_t duration = 15;
-    double freq = 4000;
+    double w0 = 500 * M_PI * 2.0;
+    double sin_ramp = 1000 * M_PI * 2.0;
     double sin_amp = pow(10.0, -90.0 * 0.05);
+    double w1;
+    double t_s;
     int lapbits = 0;
     int dtype = 2;
     int c = 0;
+    int floatout = 0;
     uint32_t samples;
     int fixbits;
     float in[4096];
@@ -138,18 +153,20 @@ int main(int argc, char *argv[])
     int opt;
     int i;
 
-    while ((opt = getopt(argc, argv, "i:o:r:t:f:a:b:d:c")) != -1)
+    while ((opt = getopt(argc, argv, "i:o:r:t:f:m:a:b:d:cF")) != -1)
         switch (opt)
         {
         case 'i': inname = optarg;                          break;
         case 'o': outname = optarg;                         break;
         case 'r': rate = atoi(optarg);                      break;
         case 't': duration = atoi(optarg);                  break;
-        case 'f': freq = atoi(optarg);                      break;
+        case 'f': w0 = atoi(optarg) * M_PI * 2.0;           break;
+        case 'm': sin_ramp = atof(optarg) * M_PI * 2.0;     break;
         case 'a': sin_amp = pow(10.0, atof(optarg) * 0.05); break;
         case 'b': lapbits = atoi(optarg);                   break;
         case 'd': dtype = atoi(optarg);                     break;
         case 'c': c = 1;                                    break;
+        case 'F': floatout = 1;                             break;
         default:
             fprintf(stderr, "unknown option '%c'\n", opt);
             exit(EXIT_FAILURE);
@@ -157,7 +174,7 @@ int main(int argc, char *argv[])
 
     if (inname)
     {
-        if ((infile = sf_open(inname, SFM_WRITE, &sfinfo)) == NULL)
+        if ((infile = sf_open(inname, SFM_READ, &sfinfo)) == NULL)
         {
             fprintf(stderr, "couldn't open input outfile '%s'\n", inname);
             exit(EXIT_FAILURE);
@@ -180,7 +197,10 @@ int main(int argc, char *argv[])
         sfinfo.channels = 1;
     }
 
-    sfinfo.format = (SF_FORMAT_WAV | SF_FORMAT_PCM_16);
+    if (floatout)
+        sfinfo.format = (SF_FORMAT_WAV | SF_FORMAT_FLOAT);
+    else
+        sfinfo.format = (SF_FORMAT_WAV | SF_FORMAT_PCM_16);
 
     if ((outfile = sf_open(outname, SFM_WRITE, &sfinfo)) == NULL)
     {
@@ -192,6 +212,8 @@ int main(int argc, char *argv[])
     srand(100);
 
     fixbits = 16 - lapbits;
+    w1 = w0 + sin_ramp;
+    t_s = 1.0f / rate;
 
     do
     {
@@ -199,16 +221,21 @@ int main(int argc, char *argv[])
         {
             i = samples;
             if (i > 4096) i = 4096;
-            mksine(in, i, freq, rate, sin_amp);
+            mksine(in, i, w0, w1, t_s, sin_amp);
         }
         else
             i = sf_read_float(infile, in, 4096);
 
         samples -= i;
 
-        convert(out, in, i, fixbits, dtype, c);
+        if (floatout)
+            (void)sf_write_float(outfile, in, i);
+        else
+        {
+            convert(out, in, i, fixbits, dtype, c);
 
-        (void)sf_write_short(outfile, out, i);
+            (void)sf_write_short(outfile, out, i);
+        }
     } while (i >= 4096);
 
     if (infile != NULL) sf_close(infile);
