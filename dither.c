@@ -15,6 +15,7 @@
 #define M_PI 3.14159265358979323846264338
 #endif
 
+
 #if defined(__arm__)
 static inline
 void convert16d2(int16_t *out, float const *in, size_t count)
@@ -60,40 +61,49 @@ void convert16d2(int16_t *out, float const *in, size_t count)
 }
 #endif
 
-#define RANDBITS() ((rand() ^ (rand() << 10) ^ (rand() >> 10)) & 0xffff)
-void convert_c(int16_t *out, float const *in, size_t count, int fixbits, int dtype)
+static int32_t filter(int32_t *ptr, int type)
 {
-    static int r1 = 0;
-    int r0 = 0;
+    switch (type)
+    {
+    default: break;
+    case 1: return ptr[0];
+    case 2: return ptr[0] - ptr[1];
+    case 3: return ptr[0] + ((ptr[2] - ptr[1]) >> 1);
+    case 4: return rint(ptr[0] *  2.033
+                      + ptr[1] * -2.165
+                      + ptr[2] *  1.959
+                      + ptr[3] * -1.590
+                      + ptr[4] *  0.6149);
+    }
+    return 0;
+}
+
+#define RANDBITS() ((rand() ^ (rand() << 10) ^ (rand() >> 10)) & 0xffff)
+void convert_c(int16_t *out, float const *in, size_t count, int fixbits, int dtype, int stype)
+{
+    static int32_t randwin[32];
+    static int32_t errwin[32];
+    static int iwin = 0;
     size_t i;
     float scale = (1ull << (15 + fixbits));
     int fixrnd = 1 << (fixbits - 1);
+    int rtype = dtype >> 8;
+
+    dtype &= 255;
 
     for (i = 0; i < count; i++)
     {
-        double s = in[i];
+        int dither = filter(randwin + iwin, dtype);
+        double s = in[i] * scale + filter(errwin + iwin, stype);
 
-        s *= scale;
         if (s < LONG_MIN) s = LONG_MIN;
         if (s > LONG_MAX) s = LONG_MAX;
 
-        long si = (long)s;
+        long si = ((long)s + dither + fixrnd) >> fixbits;
 
-        int dither;
-        r0 = r1;
-        r1 = RANDBITS();
-        switch (dtype)
-        {
-        default: dither = 0;            break;
-        case 1:
-            r0 = RANDBITS();
-            /*@FALLTHROUGH@*/
-        case 2: dither = r1 - r0;       break;
-        }
-
-        si = si + dither;
-
-        si = (si + fixrnd) >> fixbits;
+        iwin = (iwin - 1) & 15;
+        randwin[iwin] = randwin[iwin+16] = RANDBITS() - (rtype ? RANDBITS() : 0x8000);
+        errwin[iwin] = errwin[iwin+16] = (long)s - (si << fixbits);
 
         if (si < SHRT_MIN) si = SHRT_MIN;
         if (si > SHRT_MAX) si = SHRT_MAX;
@@ -102,14 +112,14 @@ void convert_c(int16_t *out, float const *in, size_t count, int fixbits, int dty
     }
 }
 
-void convert(int16_t *out, float const *in, size_t count, int fixbits, int dtype, int c)
+void convert(int16_t *out, float const *in, size_t count, int fixbits, int dtype, int stype, int c)
 {
 #if defined(__arm__)
-    if (c == 0 && dtype == 2 && fixbits == 16)
+    if (c == 0 && dtype == 2 && stype == 0 && fixbits == 16)
         convert16d2(out, in, count);
     else
 #endif
-        convert_c(out, in, count, fixbits, dtype);
+        convert_c(out, in, count, fixbits, dtype, stype);
 }
 
 static void mksine(float *out, size_t count, double w0, double w1, double t_s, float ampl)
@@ -141,6 +151,7 @@ int main(int argc, char *argv[])
     double t_s;
     int lapbits = 0;
     int dtype = 2;
+    int stype = 0;
     int c = 0;
     int floatout = 0;
     uint32_t samples;
@@ -153,7 +164,7 @@ int main(int argc, char *argv[])
     int opt;
     int i;
 
-    while ((opt = getopt(argc, argv, "i:o:r:t:f:m:a:b:d:cF")) != -1)
+    while ((opt = getopt(argc, argv, "i:o:r:t:f:m:a:b:d:s:cF")) != -1)
         switch (opt)
         {
         case 'i': inname = optarg;                          break;
@@ -165,6 +176,7 @@ int main(int argc, char *argv[])
         case 'a': sin_amp = pow(10.0, atof(optarg) * 0.05); break;
         case 'b': lapbits = atoi(optarg);                   break;
         case 'd': dtype = atoi(optarg);                     break;
+        case 's': stype = atoi(optarg);                     break;
         case 'c': c = 1;                                    break;
         case 'F': floatout = 1;                             break;
         default:
@@ -232,7 +244,7 @@ int main(int argc, char *argv[])
             (void)sf_write_float(outfile, in, i);
         else
         {
-            convert(out, in, i, fixbits, dtype, c);
+            convert(out, in, i, fixbits, dtype, stype, c);
 
             (void)sf_write_short(outfile, out, i);
         }
