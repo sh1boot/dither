@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <getopt.h>
 #include <stdint.h>
 #include <limits.h>
@@ -61,6 +62,8 @@ void convert16d2(int16_t *out, float const *in, size_t count)
 }
 #endif
 
+static float coeff[16] = { 1.0, 0.0 };
+
 static int32_t filter(int32_t *ptr, int type)
 {
     switch (type)
@@ -74,6 +77,31 @@ static int32_t filter(int32_t *ptr, int type)
                       + ptr[2] *  1.959
                       + ptr[3] * -1.590
                       + ptr[4] *  0.6149);
+    case 5: return ptr[1] - ptr[0];
+    case 6: return ptr[1] - ptr[0] - ptr[2];
+    case 7: return ptr[1] - ptr[0] + ((ptr[3] - ptr[2]) >> 1);
+    case 8: return rint(ptr[0] * -1.0
+                      + ptr[1] *  2.033
+                      + ptr[2] * -2.165
+                      + ptr[3] *  1.959
+                      + ptr[4] * -1.590
+                      + ptr[5] *  0.6149);
+    case 255: return rint(ptr[0] * coeff[0]
+                        + ptr[1] * coeff[1]
+                        + ptr[2] * coeff[2]
+                        + ptr[3] * coeff[3]
+                        + ptr[4] * coeff[4]
+                        + ptr[5] * coeff[5]
+                        + ptr[6] * coeff[6]
+                        + ptr[7] * coeff[7]
+                        + ptr[8] * coeff[8]
+                        + ptr[9] * coeff[9]
+                        + ptr[10] * coeff[10]
+                        + ptr[11] * coeff[11]
+                        + ptr[12] * coeff[12]
+                        + ptr[13] * coeff[13]
+                        + ptr[14] * coeff[14]
+                        + ptr[15] * coeff[15]);
     }
     return 0;
 }
@@ -164,7 +192,7 @@ int main(int argc, char *argv[])
     int opt;
     int i;
 
-    while ((opt = getopt(argc, argv, "i:o:r:t:f:m:a:b:d:s:cF")) != -1)
+    while ((opt = getopt(argc, argv, "i:o:r:t:f:m:a:b:d:s:P:cF")) != -1)
         switch (opt)
         {
         case 'i': inname = optarg;                          break;
@@ -177,6 +205,16 @@ int main(int argc, char *argv[])
         case 'b': lapbits = atoi(optarg);                   break;
         case 'd': dtype = atoi(optarg);                     break;
         case 's': stype = atoi(optarg);                     break;
+        case 'P':
+                for (i = 0; i < 16; i++)
+                    if (optarg != NULL)
+                    {
+                        coeff[i] = atof(optarg);
+                        optarg = strchr(optarg, ',');
+                        if (optarg != NULL) optarg++;
+                    }
+                    else coeff[i] = 0.0f;
+                break;
         case 'c': c = 1;                                    break;
         case 'F': floatout = 1;                             break;
         default:
