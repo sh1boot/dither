@@ -8,12 +8,35 @@ $(TARGET): $(TARGET).c
 clean:
 	rm -f $(TARGET) *.o sine.wav spectrogram.png
 
-check: spectrogram.png
+check: sweep.png
 	xloadimage $^
 
-spectrogram.png: sine.wav
-	sox $^ -n spectrogram
+%.png: %.wav
+	sox $^ -n spectrogram -z100 -Z-40 -o $@ -c "$(shell echo $@ | sed -e 's/b\([0-9]\)-\([^-]*\)/, \2 dither\/2^\1/' -e 's/nodither dither/no dither/' -e 's/.png//' -e 's/-s0/, no noise shaping/' -e 's/-s255/, custom noise shaping/' -e 's/-s\([123]\)/, \1-tap noise shaping/' -e 's/-s4/, Lipshitz noise shaping/')"
 
-sine.wav: $(TARGET)
-	./$^
+sweep.wav: $(TARGET)
+	./$(TARGET) -o $@
 
+tone.wav: $(TARGET)
+	./$(TARGET) -m0 -t1 -f1000 -o $@
+
+tone-d%.wav: $(TARGET)
+	./$(TARGET) -m0 -t1 -f1000 -d$* -o $@
+
+tone-s%.wav: $(TARGET)
+	./$(TARGET) -m0 -t1 -f1000 -d257 -s$* -o $@
+
+sweep-nodither-s%.wav: $(TARGET)
+	./$(TARGET) -b0 -d0 -s$* -o $@
+
+sweep-white-s%.wav: $(TARGET)
+	./$(TARGET) -b0 -d1 -s$* -o $@
+
+sweep-violet-s%.wav: $(TARGET)
+	./$(TARGET) -b0 -d2 -s$* -o $@
+
+sweep-3tap-s%.wav: $(TARGET)
+	./$(TARGET) -b0 -d3 -s$* -o $@
+
+sweep-tpdf-s%.wav: $(TARGET)
+	./$(TARGET) -b0 -d257 -s$* -o $@
